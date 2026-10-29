@@ -258,45 +258,47 @@ def cmd_location(args: argparse.Namespace) -> int:
         save_config(cfg)
         print("已清除坐标，自动切换在重新设置位置前不会生效")
         return 0
+    label = ""
     try:
         if args.set_coords:
             lat, lon = location.parse_coords(args.set_coords)
             source = "手动坐标"
+        elif args.city:
+            lat, lon, label = location.from_city(args.city)
+            source = "地名解析（请求只含城市名）"
+        elif args.wifi:
+            lat, lon = location.from_wifi()
+            source = "AP 指纹（BeaconDB，不含 IP 信息）"
         elif args.ip:
             lat, lon = location.from_ip()
             source = "IP 定位（走代理或 VPN 时不可信）"
         elif args.geoclue:
             lat, lon = location.from_geoclue(args.timeout)
-            source = "GeoClue2（系统定位服务）"
+            source = "GeoClue2（可能与 AP 数据库无关）"
         else:
             if cfg.latitude is None:
-                print("尚未设置位置。用 --geoclue 走系统定位，或 --set 纬度,经度 手填", file=sys.stderr)
+                print("尚未设置位置。用 --city 城市名、--set 纬度,经度 或 --wifi 取坐标", file=sys.stderr)
                 return 2
             lat, lon = cfg.latitude, cfg.longitude
             source = "已保存的坐标"
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"取位置失败：{exc}", file=sys.stderr)
-        if "disabled" in str(exc):
-            print("  GNOME 的定位总开关是关的：设置 → 隐私 → 位置服务打开后重试，"
-                  "或直接 lightswitch location --set 纬度,经度", file=sys.stderr)
         return 2
     now = datetime.now().astimezone()
     sane, offset = _sanity(lat, lon, now.tzinfo)
-    explicit = not (args.set_coords is None and not args.ip and not args.geoclue)
+    explicit = args.set_coords or args.city or args.wifi or args.ip or args.geoclue
     if not sane and not getattr(args, "force", False):
         noon = solar.solar_noon(now.date(), lon, now.tzinfo)
         print(f"坐标 {lat:.4f},{lon:.4f} 与这台机器的时区对不上：当地太阳正午换算过来是 {noon:%H:%M}，"
               f"偏了 {offset:.1f} 小时", file=sys.stderr)
-        print("  GeoClue 缺少 WiFi 指纹时会回落 IP 定位，走代理或 VPN 就会拿到出口所在地；这份坐标没有保存。",
-              file=sys.stderr)
-        print("  用 lightswitch location --set 纬度,经度 填真实位置；确实要按异地坐标调度再加 --force。",
-              file=sys.stderr)
+        print("  这份坐标没有保存。用 --city 城市名或 --set 纬度,经度 给真实位置；"
+              "确实要按异地坐标调度再加 --force。", file=sys.stderr)
         return 3
     if explicit:
         cfg.latitude, cfg.longitude = lat, lon
         save_config(cfg)
     times = solar.sun_times(now.date(), lat, lon, now.tzinfo)
-    print(f"位置：{lat:.4f},{lon:.4f}（{source}）")
+    print(f"位置：{lat:.4f},{lon:.4f}（{source}{'：' + label if label else ''}）")
     if times.sunrise and times.sunset:
         print(f"今日日出 {times.sunrise:%H:%M}，日落 {times.sunset:%H:%M}")
     else:
@@ -402,10 +404,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_config)
 
     p = sub.add_parser("location", help="获取或设置地理位置")
-    p.add_argument("--geoclue", action="store_true", help="用系统定位服务（桌面会弹授权）")
-    p.add_argument("--ip", action="store_true", help="按出口 IP 猜（代理环境下不准）")
-    p.add_argument("--set", dest="set_coords", help="手动坐标：纬度,经度")
-    p.add_argument("--clear", action="store_true", help="清除已保存的坐标")
+    source = p.add_mutually_exclusive_group()
+    source.add_argument("--city", help="按城市名解析坐标（只发送地名，与出口 IP 无关）")
+    source.add_argument("--wifi", action="store_true", help="按周边 AP 指纹查询 BeaconDB（不含 IP 信息）")
+    source.add_argument("--set", dest="set_coords", help="手动坐标：纬度,经度")
+    source.add_argument("--geoclue", action="store_true", help="用系统定位服务（不推荐：可能与 AP 数据库无关，也不保证有授权提示）")
+    source.add_argument("--ip", action="store_true", help="按出口 IP 猜（走 Clash TUN 等代理时拿到的是出口所在地）")
+    source.add_argument("--clear", action="store_true", help="清除已保存的坐标")
     p.add_argument("--force", action="store_true", help="坐标与机器时区不符时仍然保存")
     p.add_argument("--timeout", type=int, default=45)
     p.set_defaults(func=cmd_location)

@@ -110,7 +110,7 @@ class CliTest(unittest.TestCase):
         result = self.run_cli("location", "--set", "34.0504,-118.2430")
         self.assertEqual(result.returncode, 3)
         self.assertIn("对不上", result.stderr)
-        self.assertIn("代理", result.stderr)
+        self.assertIn("这份坐标没有保存", result.stderr)
         after = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
         self.assertEqual(after["latitude"], before["latitude"])
 

@@ -19,20 +19,26 @@
 ```sh
 cd "/home/galahadl/文件/usertheme-lightswitch"
 ./bin/lightswitch install        # 建 ~/.local/bin/lightswitch 软链，写入 systemd 用户单元
-./bin/lightswitch location --geoclue   # 在桌面终端里跑，会弹系统定位授权
+./bin/lightswitch location --city 哈尔滨   # 或 --set 纬度,经度；都不依赖出口 IP
 ./bin/lightswitch auto on
 ```
 
-`install` 不需要 sudo：改的都是用户级路径（`~/.config`、`~/.local`、systemd 用户管理器）。在桌面终端而不是 SSH 里跑 `location --geoclue`，因为定位授权由 GNOME 会话里的 GeoClue 代理应答。
+`install` 不需要 sudo：改的都是用户级路径（`~/.config`、`~/.local`、systemd 用户管理器）。
 
-两点关于定位的实话：GeoClue 只在 GNOME 的「设置 → 隐私 → 位置服务」打开时才给坐标，否则报 `Geolocation disabled for UID`；而它拿不到 WiFi 指纹时会回落到 IP 定位，走代理或 VPN 就返回**出口所在地**（实测拿到了洛杉矶）。所以坐标入库前会做一次自洽检查——把该坐标的太阳正午换算到机器时区，偏离当地正午超过 4 小时就判为可疑，不保存并提示改用 `--set`；确实要按异地坐标调度才加 `--force`。`tick` 与 `status` 也做同样的检查，宁可拒绝切换也不在错误的时刻翻主题。
+## 定位：代理环境下怎么取到真坐标
 
-```sh
-lightswitch location --set 39.9042,116.4074
-lightswitch location --ip         # 走代理时结果不可信，会被自洽检查拦下
-lightswitch location --clear      # 清除坐标
-    lightswitch location --set 39.9042,116.4074 --force   # 明知坐标与机器时区不符时才用
-```
+这台机器常年挂着 Clash Verge 的 TUN，任何按**出口 IP** 推位置的服务都会返回代理落地（实测拿到洛杉矶）。GeoClue 2.7 的可执行文件里只内嵌了一个端点 `https://api.beacondb.net/v1/geolocate`，也就是它和本工具的 `--wifi` 用的是同一个 AP 数据库；校园网这类 AP 在库里没有记录时它就查不到，转而给出一个与 AP 无关的结果，而且这条路径不保证弹授权——所以它不适合当默认来源。
+
+四类取法，按可信度排：
+
+| 方式 | 往外发什么 | 说明 |
+|---|---|---|
+| `lightswitch location --city 哈尔滨` | 只有地名 | 与出口 IP 无关，穿 TUN 也准；返回后仍会做时区自洽检查 |
+| `lightswitch location --set 45.78,126.68` | 什么都不发 | 想要校区级精度时用，离线可用 |
+| `lightswitch location --wifi` | 只发周边 AP 的 BSSID 与信号强度 | 不含 IP 信息，但 BeaconDB 对中国大陆覆盖很薄，校园 AP 实测 404 |
+| `lightswitch location --ip` / `--geoclue` | IP 或系统定位 | 兜底，TUN 环境下大概率是落地位置，通常会被自洽检查拦下（`--force` 可越过） |
+
+坐标只写在 `~/.config/lightswitch/config.json`，除上述查询外不发往任何地方；`tick` 与 `status` 完全离线。
 
 ## 命令
 
@@ -70,11 +76,11 @@ lightswitch location --clear      # 清除坐标
 ```sh
 git clone <本仓库> ~/usertheme-lightswitch    # 或 rsync 整个目录
 cd ~/usertheme-lightswitch && ./bin/lightswitch install
-./bin/lightswitch location --geoclue
+./bin/lightswitch location --city <城市>
 ./bin/lightswitch auto on
 ```
 
-换机器只需重跑 `location`；主题名不同就用 `lightswitch config set` 改成那台机器上实际安装的浅/深色主题与图标包名（`doctor` 会指出哪一项不存在）。
+换机器只需重跑 `location --city`；主题名不同就用 `lightswitch config set` 改成那台机器上实际安装的浅/深色主题与图标包名（`doctor` 会指出哪一项不存在）。
 
 ## 开发
 
