@@ -54,6 +54,12 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _sanity(latitude: float, longitude: float, tz) -> tuple[bool, float]:
+    """坐标与机器时区是否自洽：太阳正午应落在当地时间正午附近（容差 4 小时）。"""
+    offset = solar.noon_offset_hours(solar.solar_noon(datetime.now().astimezone().date(), longitude, tz))
+    return offset <= 4.0, offset
+
+
 def _apply(cfg: Config, variant: str, dry_run: bool = False) -> str:
     spec = cfg.spec(variant)
     themes.execute(themes.plan(cfg, variant), dry_run=dry_run)
@@ -92,7 +98,13 @@ def cmd_tick(args: argparse.Namespace) -> int:
         print("尚未设置位置：先运行 lightswitch location --geoclue，或用 --set 纬度,经度 手填", file=sys.stderr)
         return 2
     now = _parse_moment(args.at)
-    times = solar.sun_times(now.date(), cfg.latitude, cfg.longitude, now.tzinfo or _local_tz())
+    tz = now.tzinfo or _local_tz()
+    sane, offset = _sanity(cfg.latitude, cfg.longitude, tz)
+    if not sane:
+        print(f"坐标 {cfg.latitude:.4f},{cfg.longitude:.4f} 与机器时区相差 {offset:.1f} 小时，"
+              "日照区间落不到当地的白天，拒绝切换；请用 lightswitch location --set 校正", file=sys.stderr)
+        return 2
+    times = solar.sun_times(now.date(), cfg.latitude, cfg.longitude, tz)
     wanted = solar.decide(now, times, cfg.buffer_minutes)
     spec = cfg.spec(wanted)
     state = load_state()
@@ -151,7 +163,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             tomorrow = now + timedelta(days=1)
             next_times = solar.sun_times(tomorrow.date(), cfg.latitude, cfg.longitude, now.tzinfo)
             upcoming = solar.next_change(now, next_times, cfg.buffer_minutes, state.variant)
-        if upcoming:
+        if upcoming and _sanity(cfg.latitude, cfg.longitude, now.tzinfo)[0]:
             planned = {"at": upcoming[0].isoformat(timespec="minutes"), "variant": upcoming[1]}
 
     payload = {
@@ -187,6 +199,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         print(f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  极昼" if sun and sun.kind == "polar_day"
               else f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  极夜")
+    if cfg.latitude is not None and cfg.longitude is not None:
+        sane, offset = _sanity(cfg.latitude, cfg.longitude, now.tzinfo)
+        if not sane:
+            print(f"⚠ 坐标与机器时区相差 {offset:.1f} 小时，日照区间不在当地白天，疑似代理环境下的 IP 定位；"
+                  "请用 lightswitch location --set 校正")
     if planned:
         target = "浅色" if planned["variant"] == "light" else "深色"
         print(f"下次切换：{planned['at']} → {target}")
@@ -263,10 +280,21 @@ def cmd_location(args: argparse.Namespace) -> int:
             print("  GNOME 的定位总开关是关的：设置 → 隐私 → 位置服务打开后重试，"
                   "或直接 lightswitch location --set 纬度,经度", file=sys.stderr)
         return 2
-    if not (args.set_coords is None and not args.ip and not args.geoclue):
+    now = datetime.now().astimezone()
+    sane, offset = _sanity(lat, lon, now.tzinfo)
+    explicit = not (args.set_coords is None and not args.ip and not args.geoclue)
+    if not sane and not getattr(args, "force", False):
+        noon = solar.solar_noon(now.date(), lon, now.tzinfo)
+        print(f"坐标 {lat:.4f},{lon:.4f} 与这台机器的时区对不上：当地太阳正午换算过来是 {noon:%H:%M}，"
+              f"偏了 {offset:.1f} 小时", file=sys.stderr)
+        print("  GeoClue 缺少 WiFi 指纹时会回落 IP 定位，走代理或 VPN 就会拿到出口所在地；这份坐标没有保存。",
+              file=sys.stderr)
+        print("  用 lightswitch location --set 纬度,经度 填真实位置；确实要按异地坐标调度再加 --force。",
+              file=sys.stderr)
+        return 3
+    if explicit:
         cfg.latitude, cfg.longitude = lat, lon
         save_config(cfg)
-    now = datetime.now().astimezone()
     times = solar.sun_times(now.date(), lat, lon, now.tzinfo)
     print(f"位置：{lat:.4f},{lon:.4f}（{source}）")
     if times.sunrise and times.sunset:
@@ -378,6 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ip", action="store_true", help="按出口 IP 猜（代理环境下不准）")
     p.add_argument("--set", dest="set_coords", help="手动坐标：纬度,经度")
     p.add_argument("--clear", action="store_true", help="清除已保存的坐标")
+    p.add_argument("--force", action="store_true", help="坐标与机器时区不符时仍然保存")
     p.add_argument("--timeout", type=int, default=45)
     p.set_defaults(func=cmd_location)
 

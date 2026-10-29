@@ -25,12 +25,13 @@ cd "/home/galahadl/文件/usertheme-lightswitch"
 
 `install` 不需要 sudo：改的都是用户级路径（`~/.config`、`~/.local`、systemd 用户管理器）。在桌面终端而不是 SSH 里跑 `location --geoclue`，因为定位授权由 GNOME 会话里的 GeoClue 代理应答。
 
-GeoClue 只在 GNOME 的「设置 → 隐私 → 位置服务」打开时才给坐标，否则会报 `Geolocation disabled for UID`；不想开总开关就手填坐标。坐标也可以手填，或用出口 IP 粗猜（走代理或 VPN 时不准）：
+两点关于定位的实话：GeoClue 只在 GNOME 的「设置 → 隐私 → 位置服务」打开时才给坐标，否则报 `Geolocation disabled for UID`；而它拿不到 WiFi 指纹时会回落到 IP 定位，走代理或 VPN 就返回**出口所在地**（实测拿到了洛杉矶）。所以坐标入库前会做一次自洽检查——把该坐标的太阳正午换算到机器时区，偏离当地正午超过 4 小时就判为可疑，不保存并提示改用 `--set`；确实要按异地坐标调度才加 `--force`。`tick` 与 `status` 也做同样的检查，宁可拒绝切换也不在错误的时刻翻主题。
 
 ```sh
 lightswitch location --set 39.9042,116.4074
-lightswitch location --ip
+lightswitch location --ip         # 走代理时结果不可信，会被自洽检查拦下
 lightswitch location --clear      # 清除坐标
+    lightswitch location --set 39.9042,116.4074 --force   # 明知坐标与机器时区不符时才用
 ```
 
 ## 命令

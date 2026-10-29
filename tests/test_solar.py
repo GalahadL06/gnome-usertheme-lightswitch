@@ -30,6 +30,23 @@ class SunTimesTest(unittest.TestCase):
         self.assertEqual(night.kind, "polar_night")
         self.assertIsNone(day.sunrise)
 
+    def test_site_far_from_machine_timezone_stays_ordered(self):
+        times = solar.sun_times(date(2026, 10, 29), 34.0504, -118.2430, SHANGHAI)
+        self.assertLess(times.sunrise, times.sunset)
+        noon = solar.solar_noon(date(2026, 10, 29), -118.2430, SHANGHAI)
+        self.assertGreater(solar.noon_offset_hours(noon), 4)
+
+    def test_sydney_sunrise_lands_on_requested_local_day(self):
+        times = solar.sun_times(date(2026, 10, 29), *SYDNEY, ZoneInfo("Australia/Sydney"))
+        self.assertEqual(times.sunrise.date(), date(2026, 10, 29))
+        self.assertEqual(times.sunset.date(), date(2026, 10, 29))
+        self.assertTrue(5 <= times.sunrise.hour <= 6, times.sunrise)
+
+    def test_solar_noon_sits_near_local_noon_for_matching_timezone(self):
+        noon = solar.solar_noon(date(2026, 10, 29), 116.35983, SHANGHAI)
+        self.assertLess(solar.noon_offset_hours(noon), 0.5)
+        self.assertTrue(11 <= noon.hour <= 13, noon)
+
     def test_dst_day_stays_local(self):
         tz = ZoneInfo("America/New_York")
         times = solar.sun_times(date(2026, 11, 1), 40.7128, -74.0060, tz)

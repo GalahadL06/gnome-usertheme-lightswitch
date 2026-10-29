@@ -105,6 +105,29 @@ class CliTest(unittest.TestCase):
         self.assertIn("06:39", result.stdout)
         self.assertIn("17:16", result.stdout)
 
+    def test_location_rejects_coordinates_from_another_timezone(self):
+        before = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
+        result = self.run_cli("location", "--set", "34.0504,-118.2430")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("对不上", result.stderr)
+        self.assertIn("代理", result.stderr)
+        after = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
+        self.assertEqual(after["latitude"], before["latitude"])
+
+    def test_location_force_saves_mismatched_coordinates(self):
+        result = self.run_cli("location", "--set", "34.0504,-118.2430", "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
+        self.assertAlmostEqual(saved["latitude"], 34.0504, places=3)
+
+    def test_tick_refuses_to_switch_with_mismatched_coordinates(self):
+        (self.home / ".config" / "lightswitch" / "config.json").write_text(
+            json.dumps({"latitude": 34.0504, "longitude": -118.2430})
+        )
+        result = self.run_cli("tick", "--at", "2026-10-29T12:00")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("拒绝切换", result.stderr)
+
     def test_location_clear_removes_coordinates(self):
         result = self.run_cli("location", "--clear")
         self.assertEqual(result.returncode, 0, result.stderr)
