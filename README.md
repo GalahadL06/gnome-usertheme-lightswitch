@@ -1,4 +1,4 @@
-# lightswitch
+# gnome-usertheme-lightswitch
 
 按地理位置计算日出日落，并据此维护 GNOME 桌面的浅色/深色主题、图标包与动态壁纸。适用于被主题安装脚本接管了 libadwaita 样式、从而失去系统自动切换能力的桌面环境。
 
