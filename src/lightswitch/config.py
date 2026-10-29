@@ -39,6 +39,8 @@ class Config:
     longitude: float | None = None
     buffer_minutes: int = 0
     apply_shell: bool = True
+    wallpaper_ddw: str | None = None
+    wallpaper_enabled: bool = False
     light: ThemeSpec = field(default_factory=lambda: ThemeSpec(**DEFAULT_SPECS["light"]))
     dark: ThemeSpec = field(default_factory=lambda: ThemeSpec(**DEFAULT_SPECS["dark"]))
 
@@ -90,6 +92,8 @@ def load_config(home: Path | None = None) -> Config:
         longitude=raw.get("longitude"),
         buffer_minutes=int(raw.get("buffer_minutes", 0)),
         apply_shell=bool(raw.get("apply_shell", True)),
+        wallpaper_ddw=raw.get("wallpaper_ddw"),
+        wallpaper_enabled=bool(raw.get("wallpaper_enabled", False)),
         light=_spec_from(raw.get("light"), "light"),
         dark=_spec_from(raw.get("dark"), "dark"),
     )

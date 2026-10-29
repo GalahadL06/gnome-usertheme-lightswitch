@@ -10,7 +10,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import location, scheduler, solar, themes
+from . import location, scheduler, solar, themes, wallpaper
 from .config import (
     VARIANTS,
     Config,
@@ -113,8 +113,12 @@ def cmd_tick(args: argparse.Namespace) -> int:
             state.last_tick = _now_iso()
             save_state(state)
         print(f"{now:%Y-%m-%d %H:%M} 已是{'浅色' if wanted == 'light' else '深色'}（{spec.gtk}），无需动作")
+        if cfg.wallpaper_enabled:
+            print(_apply_wallpaper(cfg, now, args.dry_run))
         return 0
     print(_apply(cfg, wanted, args.dry_run))
+    if cfg.wallpaper_enabled:
+        print(_apply_wallpaper(cfg, now, args.dry_run))
     if not args.dry_run:
         state = load_state()
         state.last_tick = _now_iso()
@@ -191,6 +195,20 @@ def cmd_status(args: argparse.Namespace) -> int:
           + (f"（{state.applied_at} 应用）" if state.applied_at else "（未由本工具应用过）"))
     print(f"gsettings：gtk={gtk or '?'}  icon={icons or '?'}  color-scheme={scheme or '?'}  shell={shell or '未启用'}")
     print(f"libadwaita：gtk.css → {css_target}")
+    if cfg.wallpaper_enabled and cfg.wallpaper_ddw:
+        try:
+            theme, images = _wallpaper_state(cfg)
+            if theme and cfg.latitude is not None:
+                entry = wallpaper.current(now, cfg.latitude, cfg.longitude, now.tzinfo, theme, images)
+                upcoming_wall = wallpaper.next_entry(now, cfg.latitude, cfg.longitude, now.tzinfo, theme, images)
+                if entry:
+                    moment, index = entry
+                    line = f"壁纸：{images[index].name}（{moment:%H:%M} 起）"
+                    if upcoming_wall:
+                        line += f"，下次 {upcoming_wall[0]:%H:%M} → {images[upcoming_wall[1]].name}"
+                    print(line)
+        except (ValueError, OSError) as exc:
+            print(f"壁纸：读取失败（{exc}）")
     if sun and sun.sunrise and sun.sunset:
         print(f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  日出 {sun.sunrise:%H:%M}  日落 {sun.sunset:%H:%M}"
               f"  缓冲 {cfg.buffer_minutes} 分钟")
@@ -306,6 +324,90 @@ def cmd_location(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _wallpaper_state(cfg: Config):
+    """读取 .ddw 并确保图片已解到缓存，返回 (主题, 图片表) 或 None。"""
+    if not cfg.wallpaper_ddw:
+        return None
+    ddw = Path(cfg.wallpaper_ddw).expanduser()
+    theme = wallpaper.read_theme(ddw)
+    images = wallpaper.extract(ddw, Path.home() / ".cache" / "lightswitch" / "wallpapers", theme)
+    return theme, images
+
+
+def _apply_wallpaper(cfg: Config, now: datetime, dry_run: bool = False) -> str:
+    if not cfg.wallpaper_enabled or not cfg.wallpaper_ddw:
+        return "壁纸：未启用"
+    if cfg.latitude is None or cfg.longitude is None:
+        return "壁纸：缺少坐标，跳过"
+    loaded = _wallpaper_state(cfg)
+    if loaded is None:
+        return "壁纸：主题不可读，跳过"
+    theme, images = loaded
+    entry = wallpaper.current(now, cfg.latitude, cfg.longitude, now.tzinfo, theme, images)
+    if entry is None:
+        return "壁纸：这段日期没有可用时段，跳过"
+    moment, index = entry
+    path = images[index]
+    uri = path.resolve().as_uri()
+    if not dry_run and _gsettings_get(wallpaper.BACKGROUND_SCHEMA, "picture-uri") == uri:
+        return f"壁纸：{path.name}（{moment:%H:%M} 起）已生效"
+    themes.execute(wallpaper.apply_actions(path), dry_run=dry_run)
+    return f"壁纸：{path.name}（{moment:%H:%M} 起）" + ("（演练）" if dry_run else "")
+
+
+def cmd_wallpaper(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    if args.action == "off":
+        cfg.wallpaper_enabled = False
+        save_config(cfg)
+        print("壁纸轮换已停止，当前壁纸保持不变")
+        return 0
+    if args.action == "use":
+        ddw = Path(args.path).expanduser()
+        if not ddw.is_file():
+            print(f"找不到 {ddw}", file=sys.stderr)
+            return 2
+        try:
+            theme = wallpaper.read_theme(ddw)
+            images = wallpaper.extract(ddw, Path.home() / ".cache" / "lightswitch" / "wallpapers", theme)
+        except ValueError as exc:
+            print(f"载入失败：{exc}", file=sys.stderr)
+            return 2
+        cfg.wallpaper_ddw = str(ddw.resolve())
+        cfg.wallpaper_enabled = True
+        save_config(cfg)
+        counts = f"日出 {len(theme.sunrise)} / 白天 {len(theme.day)} / 日落 {len(theme.sunset)} / 夜间 {len(theme.night)}"
+        print(f"已启用 {theme.theme_id}（{counts}，共 {len(images)} 张）")
+        print(_apply_wallpaper(cfg, datetime.now().astimezone()))
+        return 0
+    if args.action == "apply":
+        now = _parse_moment(args.at)
+        print(_apply_wallpaper(cfg, now, args.dry_run))
+        return 0
+    # status
+    if not cfg.wallpaper_ddw:
+        print("壁纸轮换：未配置（lightswitch wallpaper use 路径.ddw）")
+        return 0
+    ddw = Path(cfg.wallpaper_ddw)
+    theme = wallpaper.read_theme(ddw)
+    images = wallpaper.extract(ddw, Path.home() / ".cache" / "lightswitch" / "wallpapers", theme)
+    print(f"壁纸轮换：{'启用' if cfg.wallpaper_enabled else '停用'}  {theme.theme_id}  {ddw}")
+    if cfg.latitude is None:
+        print("  缺少坐标，无法排布")
+        return 0
+    now = datetime.now().astimezone()
+    entry = wallpaper.current(now, cfg.latitude, cfg.longitude, now.tzinfo, theme, images)
+    upcoming = wallpaper.next_entry(now, cfg.latitude, cfg.longitude, now.tzinfo, theme, images)
+    if entry:
+        moment, index = entry
+        print(f"  当前：{images[index].name}（{moment:%H:%M} 起）  gsettings 实际：{Path(_gsettings_get(wallpaper.BACKGROUND_SCHEMA, 'picture-uri')).name}")
+    if upcoming:
+        moment, index = upcoming
+        print(f"  下次：{moment:%m-%d %H:%M} → {images[index].name}")
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     repo = Path(__file__).resolve().parents[2]
     launcher = repo / "bin" / "lightswitch"
@@ -349,6 +451,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     schema_ok = subprocess.run(["gsettings", "list-keys", themes.SHELL_SCHEMA], capture_output=True).returncode == 0
     checks.append(("user-theme 扩展 schema", schema_ok, themes.SHELL_SCHEMA))
     checks.append(("位置已设置", cfg.latitude is not None, f"{cfg.latitude},{cfg.longitude}"))
+    if cfg.wallpaper_enabled:
+        ddw = Path(cfg.wallpaper_ddw or "").expanduser()
+        ok = ddw.is_file()
+        detail = str(ddw) if ok else f"{ddw} 不存在"
+        checks.append(("壁纸主题 .ddw", ok, detail))
     checks.append(("systemd 用户管理器", scheduler.is_enabled() != "unknown", scheduler.is_enabled()))
     failed = 0
     for name, ok, detail in checks:
@@ -414,6 +521,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="坐标与机器时区不符时仍然保存")
     p.add_argument("--timeout", type=int, default=45)
     p.set_defaults(func=cmd_location)
+
+    p = sub.add_parser("wallpaper", help="按 WinDynamicDesktop 的 .ddw 主题随时段轮换壁纸")
+    p.add_argument("action", choices=("use", "off", "apply", "status"), nargs="?", default="status")
+    p.add_argument("path", nargs="?", help="use 时要载入的 .ddw 文件")
+    p.add_argument("--at", help="apply 时按指定时间取图")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_wallpaper)
 
     p = sub.add_parser("install", help="安装命令入口与 systemd 用户定时器")
     p.set_defaults(func=cmd_install)

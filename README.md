@@ -51,7 +51,8 @@ cd "/home/galahadl/文件/usertheme-lightswitch"
 | `lightswitch tick [--at 2026-10-29T18:30] [--dry-run]` | 按当前时间核对并切换一次；`--at` 用于验证判定 |
 | `lightswitch config show` | 查看浅色/深色各自用的主题、图标、Shell 主题与 CSS |
 | `lightswitch config set --light-theme ... --light-icons ... --dark-theme ... --dark-icons ... --buffer 20 --shell off` | 改配置 |
-| `lightswitch doctor` | 自检 CSS、主题目录、图标包、schema 与定时器 |
+| `lightswitch wallpaper use/off/apply/status` | 按 .ddw 随时段轮换壁纸，见下一节 |
+| `lightswitch doctor` | 自检 CSS、主题目录、图标包、schema、壁纸与定时器 |
 | `lightswitch uninstall` | 移除定时器与命令入口，主题保持现状 |
 
 配置文件 `~/.config/lightswitch/config.json`，运行状态 `~/.local/state/lightswitch/state.json`。缓冲分钟数默认 0：日出即切浅色、日落即切深色；设成 20 则是日出后 20 分钟切浅、日落前 20 分钟切深。
@@ -61,6 +62,30 @@ cd "/home/galahadl/文件/usertheme-lightswitch"
 用一个 `systemd --user` 定时器每 5 分钟跑一次 `lightswitch tick`，由 tick 自己判断此刻该是浅色还是深色，状态已经正确就什么也不做。没有用「日出、日落各设一个精确闹钟」，因为笔记本休眠、时区变更、夏令时切换和换城市都会让固定闹钟失准，而幂等的轮询每次醒来都能自愈；开销只是一次本地天文计算。
 
 `tick` 除了比对上一次应用的结果，还会读一次当前 `gtk-theme`：如果被上游 `install.sh -l` 或其他主题工具改回深色，下一轮就会被纠正。
+
+## 壁纸：直接吃 WinDynamicDesktop 的 .ddw
+
+`.ddw` 就是一个 zip：一份 `theme.json` 加一组图片。工具照搬了 WinDynamicDesktop 的排布方式，而不是自己发明一套：
+
+| 时段 | 太阳高度边界 | 用哪组图 |
+|---|---|---|
+| 日出 | 民用黎明 −6° → 金色时段结束 +6° | `sunriseImageList` |
+| 白天 | +6° → 当日金色时段开始 +6° | `dayImageList` |
+| 日落 | +6° → 民用黄昏 −6° | `sunsetImageList` |
+| 夜间 | −6° → 次日民用黎明 | `nightImageList` |
+
+每组图片在自己那段时间里**均匀铺开**（WinDynamicDesktop 的 `SolarScheduler.GetAllImageTimes` 就是这么算的），当前时刻取最后一个已生效的条目；夜间段跨到次日黎明，所以凌晨仍在用昨夜那张。边界按 `SunriseSunset.cs` 的口径：日出日落 −0.833°、民用晨昏蒙影 −6°、金色时段 ±6°。高纬度极昼极夜时对应段为空，会自然跳过着色。
+
+图片按 `imageFilename` 里的 `*` 替换成序号定位（如 `amalfi_6K_fp_*.jpg`），解压到 `~/.cache/lightswitch/wallpapers/<ddw 内容哈希>/`，同一个主题只解一次。套用是 `org.gnome.desktop.background` 的 `picture-uri` 与 `picture-uri-dark` 同时指向同一张，`picture-options=zoom`，因此浅色深色两种模式不会各显示一张。当前图与目标一致时 `tick` 不写 gsettings，日志里只会看到「已生效」。
+
+```sh
+lightswitch wallpaper use ~/下載/Sony_Alpha_Clock_Amalfi_6K.ddw   # 载入并立刻套用
+lightswitch wallpaper status        # 主题、当前图、下次换图时刻
+lightswitch wallpaper apply --at 06:20   # 指定时刻取图，便于验证
+lightswitch wallpaper off           # 停止轮换，当前壁纸不动
+```
+
+壁纸跟着太阳走，深浅色主题跟着日出日落走，两者互相独立：黄昏后主题已转深色，壁纸也会在民用黄昏那一刻换成夜景。定时器仍是 5 分钟一格，所以换图最多滞后 5 分钟（WinDynamicDesktop 自己是按秒级事件调度，这里刻意用轮询换取休眠与换城市后的自愈）。109 MB 的 6K 主题解出来也是 109 MB，缓存可以直接删，下次载入会重建。
 
 ## 与 MacTahoe 主题的关系
 

@@ -6,7 +6,9 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone, tzinfo
 
-ZENITH = 90.833
+SUNRISE_ALTITUDE = -0.833
+CIVIL_TWILIGHT_ALTITUDE = -6.0
+GOLDEN_HOUR_ALTITUDE = 6.0
 
 
 @dataclass(frozen=True)
@@ -16,15 +18,21 @@ class SunTimes:
     kind: str
 
 
-def _event(day_of_year: int, latitude: float, longitude: float, rising: bool) -> tuple[float, float]:
-    """返回该事件的 UTC 小时数与太阳时角余弦；余弦超出 [-1,1] 说明当日不升或不落。"""
+def _event(
+    day_of_year: int, latitude: float, longitude: float, rising: bool, altitude: float = -0.833
+) -> tuple[float, float]:
+    """返回该事件的 UTC 小时数与太阳时角余弦；余弦超出 [-1,1] 说明当日不升或不落。
+
+    altitude 为事件发生时的太阳高度角：日出日落取 -0.833°，民用晨昏蒙影取 -6°，金色时段 +6°。
+    """
     lng_hour = longitude / 15.0
     t = day_of_year + ((6.0 if rising else 18.0) - lng_hour) / 24.0
     m = 0.9856 * t - 3.289
     l = (m + 1.916 * math.sin(math.radians(m)) + 0.020 * math.sin(math.radians(2 * m)) + 282.634) % 360.0
     sin_dec = 0.39782 * math.sin(math.radians(l))
     cos_dec = math.cos(math.asin(sin_dec))
-    cos_h = (math.cos(math.radians(ZENITH)) - sin_dec * math.sin(math.radians(latitude))) / (
+    zenith = 90.0 - altitude
+    cos_h = (math.cos(math.radians(zenith)) - sin_dec * math.sin(math.radians(latitude))) / (
         cos_dec * math.cos(math.radians(latitude))
     )
     if not -1.0 <= cos_h <= 1.0:
@@ -52,12 +60,12 @@ def _place(day: date, ut_hours: float, longitude: float, tz: tzinfo) -> datetime
 def sun_times(day: date, latitude: float, longitude: float, tz: tzinfo) -> SunTimes:
     """返回该日当地时区的日出、日落；极昼极夜时两者为 None 并由 kind 标记。"""
     day_of_year = day.timetuple().tm_yday
-    rise_ut, cos_h = _event(day_of_year, latitude, longitude, True)
+    rise_ut, cos_h = _event(day_of_year, latitude, longitude, True, SUNRISE_ALTITUDE)
     if cos_h > 1.0:
         return SunTimes(None, None, "polar_night")
     if cos_h < -1.0:
         return SunTimes(None, None, "polar_day")
-    drop_ut, _ = _event(day_of_year, latitude, longitude, False)
+    drop_ut, _ = _event(day_of_year, latitude, longitude, False, SUNRISE_ALTITUDE)
     return SunTimes(_place(day, rise_ut, longitude, tz), _place(day, drop_ut, longitude, tz), "normal")
 
 
@@ -98,3 +106,23 @@ def next_change(
         if moment > now and variant != current:
             return moment, variant
     return None
+
+
+def event_time(day: date, latitude: float, longitude: float, tz: tzinfo, altitude: float, rising: bool):
+    """某高度角的穿越时刻；当日不穿越时返回 None。"""
+    ut, cos_h = _event(day.timetuple().tm_yday, latitude, longitude, rising, altitude)
+    if not -1.0 <= cos_h <= 1.0:
+        return None
+    return _place(day, ut, longitude, tz)
+
+
+def day_segments(day: date, latitude: float, longitude: float, tz: tzinfo) -> dict[str, datetime | None]:
+    """WinDynamicDesktop 划分昼夜用的四个边界：民用黎明、金色时段结束、金色时段开始、民用黄昏。"""
+    return {
+        "dawn": event_time(day, latitude, longitude, tz, CIVIL_TWILIGHT_ALTITUDE, True),
+        "golden_am": event_time(day, latitude, longitude, tz, GOLDEN_HOUR_ALTITUDE, True),
+        "sunrise": event_time(day, latitude, longitude, tz, SUNRISE_ALTITUDE, True),
+        "sunset": event_time(day, latitude, longitude, tz, SUNRISE_ALTITUDE, False),
+        "golden_pm": event_time(day, latitude, longitude, tz, GOLDEN_HOUR_ALTITUDE, False),
+        "dusk": event_time(day, latitude, longitude, tz, CIVIL_TWILIGHT_ALTITUDE, False),
+    }
