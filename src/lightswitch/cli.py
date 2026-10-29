@@ -89,7 +89,7 @@ def cmd_toggle(args: argparse.Namespace) -> int:
 def cmd_tick(args: argparse.Namespace) -> int:
     cfg = load_config()
     if cfg.latitude is None or cfg.longitude is None:
-        print("尚未设置位置：先运行 lightswitch location --auto（或在桌面上用手动坐标）", file=sys.stderr)
+        print("尚未设置位置：先运行 lightswitch location --geoclue，或用 --set 纬度,经度 手填", file=sys.stderr)
         return 2
     now = _parse_moment(args.at)
     times = solar.sun_times(now.date(), cfg.latitude, cfg.longitude, now.tzinfo or _local_tz())
@@ -183,7 +183,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  日出 {sun.sunrise:%H:%M}  日落 {sun.sunset:%H:%M}"
               f"  缓冲 {cfg.buffer_minutes} 分钟")
     elif cfg.latitude is None:
-        print("位置：未设置（lightswitch location --auto）")
+        print("位置：未设置（lightswitch location --geoclue，或 --set 纬度,经度）")
     else:
         print(f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  极昼" if sun and sun.kind == "polar_day"
               else f"位置 {cfg.latitude:.4f},{cfg.longitude:.4f}  极夜")
