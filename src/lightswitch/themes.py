@@ -123,7 +123,7 @@ def execute(
             run(["gsettings", "set", action.schema, action.key, f"'{action.value}'"])
         elif isinstance(action, Symlink):
             if not action.target.exists():
-                raise SystemExit(f"缺少主题 CSS：{action.target}（先运行 MacTahoe 的 install.sh -l）")
+                raise SystemExit(f"缺少主题 CSS：{action.target}（该主题的安装脚本没有生成它，或 config 里的 gtk4_css 名字不对）")
             _replace_symlink(action.path, action.target)
         else:
             _write_ini(action.path, action.key, action.value)

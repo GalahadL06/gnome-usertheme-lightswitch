@@ -11,15 +11,15 @@ VARIANTS = ("light", "dark")
 
 DEFAULT_SPECS: dict[str, dict[str, str]] = {
     "light": {
-        "gtk": "MacTahoe-Light",
-        "icons": "MacTahoe-light",
-        "shell": "MacTahoe-Light",
+        "gtk": "Adwaita",
+        "icons": "Adwaita",
+        "shell": "",
         "gtk4_css": "gtk-Light.css",
     },
     "dark": {
-        "gtk": "MacTahoe-Dark",
-        "icons": "MacTahoe-dark",
-        "shell": "MacTahoe-Dark",
+        "gtk": "Adwaita-dark",
+        "icons": "Adwaita",
+        "shell": "",
         "gtk4_css": "gtk-Dark.css",
     },
 }

@@ -9,11 +9,11 @@ from lightswitch import location
 GEOCODE_PAYLOAD = {
     "results": [
         {
-            "name": "哈尔滨",
-            "latitude": 45.75,
-            "longitude": 126.65,
-            "country": "中国",
-            "admin1": "黑龙江",
+            "name": "巴黎",
+            "latitude": 48.8566,
+            "longitude": 2.3522,
+            "country": "法国",
+            "admin1": "法兰西岛",
         }
     ]
 }
@@ -42,17 +42,17 @@ def fake_urlopen(payload):
 class CityTest(unittest.TestCase):
     def test_city_lookup_returns_coordinates_and_label(self):
         with mock.patch("urllib.request.urlopen", fake_urlopen(GEOCODE_PAYLOAD)):
-            lat, lon, label = location.from_city("哈尔滨")
-        self.assertAlmostEqual(lat, 45.75)
-        self.assertAlmostEqual(lon, 126.65)
-        self.assertEqual(label, "哈尔滨 黑龙江 中国")
+            lat, lon, label = location.from_city("巴黎")
+        self.assertAlmostEqual(lat, 48.8566)
+        self.assertAlmostEqual(lon, 2.3522)
+        self.assertEqual(label, "巴黎 法兰西岛 法国")
 
     def test_city_lookup_sends_only_the_name(self):
         opener = fake_urlopen(GEOCODE_PAYLOAD)
         with mock.patch("urllib.request.urlopen", opener):
-            location.from_city("哈尔滨")
+            location.from_city("巴黎")
         url = opener.call_args[0][0].full_url
-        self.assertIn("name=%E5%93%88%E5%B0%94%E6%BB%A8", url)
+        self.assertIn("name=%E5%B7%B4%E9%BB%8E", url)
         self.assertNotIn("ip", url.lower())
 
     def test_unknown_city_explains_the_fallback(self):
@@ -73,13 +73,13 @@ class WifiTest(unittest.TestCase):
 
     def test_wifi_payload_disables_ip_fallback(self):
         proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=NMCLI_OUTPUT, stderr="")
-        opener = fake_urlopen({"location": {"lat": 45.7, "lng": 126.6}, "accuracy": 30})
+        opener = fake_urlopen({"location": {"lat": 48.8, "lng": 2.3}, "accuracy": 30})
         with mock.patch("subprocess.run", return_value=proc), mock.patch("urllib.request.urlopen", opener):
             lat, lon = location.from_wifi()
         body = json.loads(opener.call_args[0][0].data.decode())
         self.assertFalse(body["considerIp"])
-        self.assertAlmostEqual(lat, 45.7)
-        self.assertAlmostEqual(lon, 126.6)
+        self.assertAlmostEqual(lat, 48.8)
+        self.assertAlmostEqual(lon, 2.3)
 
     def test_wifi_miss_points_at_city_lookup(self):
         proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=NMCLI_OUTPUT, stderr="")
@@ -93,7 +93,7 @@ class WifiTest(unittest.TestCase):
 
 class CoordsTest(unittest.TestCase):
     def test_parse_coords_accepts_fullwidth_comma(self):
-        self.assertEqual(location.parse_coords("45.75，126.65"), (45.75, 126.65))
+        self.assertEqual(location.parse_coords("48.86，2.35"), (48.86, 2.35))
 
     def test_parse_coords_rejects_out_of_range(self):
         for text in ("91,0", "0,181", "45"):

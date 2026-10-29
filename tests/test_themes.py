@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from lightswitch import themes
-from lightswitch.config import Config
+from lightswitch.config import Config, ThemeSpec
 
 GSETTINGS_SHIM = """#!/bin/sh
 echo "$@" >> "$HOME/gsettings.log"
@@ -17,11 +17,14 @@ if [ "$1" = "set" ]; then printf '%s' "$4" > "$HOME/.gsettings.$3"; fi
 exit 0
 """
 
+LIGHT = ThemeSpec("Demo-Light", "demo-icons-light", "Demo-Light", "gtk-Light.css")
+DARK = ThemeSpec("Demo-Dark", "demo-icons-dark", "Demo-Dark", "gtk-Dark.css")
+
 
 class PlanTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
-        self.cfg = Config(latitude=39.9, longitude=116.4)
+        self.cfg = Config(latitude=48.8566, longitude=2.3522, light=LIGHT, dark=DARK)
         gtk4 = self.home / ".config" / "gtk-4.0"
         gtk4.mkdir(parents=True)
         (gtk4 / "gtk-Light.css").write_text("/* light */\n")
@@ -45,16 +48,22 @@ class PlanTest(unittest.TestCase):
     def test_light_plan_targets_light_assets(self):
         actions = themes.plan(self.cfg, "light", self.home)
         gsettings = {(a.schema, a.key): a.value for a in actions if isinstance(a, themes.Gsetting)}
-        self.assertEqual(gsettings[(themes.INTERFACE_SCHEMA, "gtk-theme")], "MacTahoe-Light")
-        self.assertEqual(gsettings[(themes.INTERFACE_SCHEMA, "icon-theme")], "MacTahoe-light")
+        self.assertEqual(gsettings[(themes.INTERFACE_SCHEMA, "gtk-theme")], "Demo-Light")
+        self.assertEqual(gsettings[(themes.INTERFACE_SCHEMA, "icon-theme")], "demo-icons-light")
         self.assertEqual(gsettings[(themes.INTERFACE_SCHEMA, "color-scheme")], "prefer-light")
-        self.assertEqual(gsettings[(themes.SHELL_SCHEMA, "name")], "MacTahoe-Light")
+        self.assertEqual(gsettings[(themes.SHELL_SCHEMA, "name")], "Demo-Light")
         links = {a.path.name: a.target.name for a in actions if isinstance(a, themes.Symlink)}
         self.assertEqual(links, {"gtk.css": "gtk-Light.css", "gtk-dark.css": "gtk-Light.css"})
 
     def test_shell_can_be_left_alone(self):
-        cfg = Config(apply_shell=False)
+        cfg = Config(apply_shell=False, light=LIGHT, dark=DARK)
         schemas = {a.schema for a in themes.plan(cfg, "dark", self.home) if isinstance(a, themes.Gsetting)}
+        self.assertNotIn(themes.SHELL_SCHEMA, schemas)
+
+    def test_empty_shell_name_skips_shell_action(self):
+        cfg = Config(light=ThemeSpec("A", "B", "", "gtk-Light.css"),
+                     dark=ThemeSpec("C", "D", "", "gtk-Dark.css"))
+        schemas = {a.schema for a in themes.plan(cfg, "light", self.home) if isinstance(a, themes.Gsetting)}
         self.assertNotIn(themes.SHELL_SCHEMA, schemas)
 
     def test_execute_applies_settings_symlinks_and_ini(self):
@@ -62,14 +71,13 @@ class PlanTest(unittest.TestCase):
 
         calls = (self.home / "gsettings.log").read_text().splitlines()
         self.assertEqual(len(calls), 4)
-        self.assertIn("set org.gnome.desktop.interface gtk-theme 'MacTahoe-Light'", calls)
+        self.assertIn("set org.gnome.desktop.interface gtk-theme 'Demo-Light'", calls)
         self.assertIn("set org.gnome.desktop.interface color-scheme 'prefer-light'", calls)
 
         gtk4 = self.home / ".config" / "gtk-4.0"
         self.assertEqual(os.readlink(gtk4 / "gtk.css"), str(gtk4 / "gtk-Light.css"))
         self.assertEqual(os.readlink(gtk4 / "gtk-dark.css"), str(gtk4 / "gtk-Light.css"))
-        self.assertIn("gtk-application-prefer-dark-theme=0",
-                      (gtk4 / "settings.ini").read_text())
+        self.assertIn("gtk-application-prefer-dark-theme=0", (gtk4 / "settings.ini").read_text())
         self.assertIn("gtk-application-prefer-dark-theme=0",
                       (self.home / ".config" / "gtk-3.0" / "settings.ini").read_text())
 

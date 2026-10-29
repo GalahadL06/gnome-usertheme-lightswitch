@@ -408,6 +408,66 @@ def cmd_wallpaper(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _detect_variants(home: Path) -> list[dict[str, str]]:
+    """在 ~/.themes 里找成套的 -Light/-Dark 主题，并配出候选配置。"""
+    themes_dir = home / ".themes"
+    if not themes_dir.is_dir():
+        return []
+    bases: dict[str, set[str]] = {}
+    for entry in themes_dir.iterdir():
+        for suffix in ("-Light", "-Dark"):
+            if entry.is_dir() and entry.name.endswith(suffix):
+                bases.setdefault(entry.name[: -len(suffix)], set()).add(suffix)
+    icon_roots = [home / ".icons", home / ".local" / "share" / "icons"]
+    icons = {p.name for root in icon_roots if root.is_dir() for p in root.iterdir() if p.is_dir()}
+    css_names = {path.name for path in themes.gtk4_dir(home).glob("gtk-*.css")}
+    found: list[dict[str, str]] = []
+    for base in sorted(b for b, kinds in bases.items() if kinds == {"-Light", "-Dark"}):
+        lower = base.lower()
+        light_icon = next((n for n in icons if lower in n.lower() and "light" in n.lower()), "")
+        dark_icon = next((n for n in icons if lower in n.lower() and "dark" in n.lower()), "")
+        found.append({
+            "light_theme": f"{base}-Light",
+            "dark_theme": f"{base}-Dark",
+            "light_shell": f"{base}-Light",
+            "dark_shell": f"{base}-Dark",
+            "light_icons": light_icon,
+            "dark_icons": dark_icon,
+            "css": "gtk-*.css" if css_names else "（未找到）",
+        })
+    return found
+
+
+def cmd_config_detect(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    candidates = _detect_variants(Path.home())
+    if not candidates:
+        print("没有在 ~/.themes 里找到成套的 -Light/-Dark 主题；用 config set 手动指定", file=sys.stderr)
+        return 1
+    for candidate in candidates:
+        print(f"候选：{candidate['light_theme']} / {candidate['dark_theme']}  "
+              f"图标 {candidate['light_icons'] or '未找到'} / {candidate['dark_icons'] or '未找到'}")
+    if not args.apply:
+        print("\n加 --apply 采用第一条候选，或按上面的名字用 config set 手改")
+        return 0
+    chosen = candidates[0]
+    mapping = {
+        "light_theme": ("light", "gtk"),
+        "light_icons": ("light", "icons"),
+        "light_shell": ("light", "shell"),
+        "dark_theme": ("dark", "gtk"),
+        "dark_icons": ("dark", "icons"),
+        "dark_shell": ("dark", "shell"),
+    }
+    for field_name, (variant, attr) in mapping.items():
+        if chosen[field_name]:
+            cfg = with_spec(cfg, variant, **{attr: chosen[field_name]})
+    save_config(cfg)
+    print(f"\n已写入：{config_path()}")
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     repo = Path(__file__).resolve().parents[2]
     launcher = repo / "bin" / "lightswitch"
@@ -510,13 +570,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--shell", choices=("on", "off"), help="是否一并切换 GNOME Shell 面板主题")
     p.set_defaults(func=cmd_config)
 
+    p = sub.add_parser("detect", help="扫描已安装的浅/深色主题对，生成配置")
+    p.add_argument("--apply", action="store_true", help="采用第一条候选并写入配置")
+    p.set_defaults(func=cmd_config_detect)
+
     p = sub.add_parser("location", help="获取或设置地理位置")
     source = p.add_mutually_exclusive_group()
     source.add_argument("--city", help="按城市名解析坐标（只发送地名，与出口 IP 无关）")
     source.add_argument("--wifi", action="store_true", help="按周边 AP 指纹查询 BeaconDB（不含 IP 信息）")
     source.add_argument("--set", dest="set_coords", help="手动坐标：纬度,经度")
     source.add_argument("--geoclue", action="store_true", help="用系统定位服务（不推荐：可能与 AP 数据库无关，也不保证有授权提示）")
-    source.add_argument("--ip", action="store_true", help="按出口 IP 猜（走 Clash TUN 等代理时拿到的是出口所在地）")
+    source.add_argument("--ip", action="store_true", help="按出口 IP 猜（走代理或 VPN 时拿到的是出口所在地）")
     source.add_argument("--clear", action="store_true", help="清除已保存的坐标")
     p.add_argument("--force", action="store_true", help="坐标与机器时区不符时仍然保存")
     p.add_argument("--timeout", type=int, default=45)

@@ -30,7 +30,13 @@ class CliTest(unittest.TestCase):
         (gtk4 / "gtk-Dark.css").write_text("/* dark */\n")
         (self.home / ".config" / "lightswitch").mkdir(parents=True)
         (self.home / ".config" / "lightswitch" / "config.json").write_text(
-            json.dumps({"latitude": 39.89455, "longitude": 116.35983, "buffer_minutes": 0})
+            json.dumps({
+                "latitude": 48.8566,
+                "longitude": 2.3522,
+                "buffer_minutes": 0,
+                "light": {"gtk": "Demo-Light", "icons": "demo-icons-light", "shell": "Demo-Light", "gtk4_css": "gtk-Light.css"},
+                "dark": {"gtk": "Demo-Dark", "icons": "demo-icons-dark", "shell": "Demo-Dark", "gtk4_css": "gtk-Dark.css"},
+            })
         )
         shim_dir = self.home / "bin"
         shim_dir.mkdir()
@@ -40,6 +46,7 @@ class CliTest(unittest.TestCase):
         self.env = os.environ.copy()
         self.env["HOME"] = str(self.home)
         self.env["PATH"] = f"{shim_dir}:{self.env['PATH']}"
+        self.env["TZ"] = "Europe/Paris"
 
     def run_cli(self, *args):
         return subprocess.run(
@@ -57,14 +64,14 @@ class CliTest(unittest.TestCase):
         self.assertIn("浅色", result.stdout)
         self.assertEqual(self.state()["variant"], "light")
         calls = (self.home / "gsettings.log").read_text()
-        self.assertIn("'MacTahoe-Light'", calls)
+        self.assertIn("'Demo-Light'", calls)
 
     def test_tick_switches_to_dark_after_sunset(self):
         self.run_cli("tick", "--at", "2026-10-29T12:00")
         result = self.run_cli("tick", "--at", "2026-10-29T18:00")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.state()["variant"], "dark")
-        self.assertIn("'MacTahoe-Dark'", (self.home / "gsettings.log").read_text())
+        self.assertIn("'Demo-Dark'", (self.home / "gsettings.log").read_text())
 
     def test_tick_is_a_noop_when_already_correct(self):
         self.run_cli("tick", "--at", "2026-10-29T18:00")
@@ -86,24 +93,24 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["variant"], "light")
-        self.assertEqual(payload["sun"]["sunrise"][11:16], "06:39")
+        self.assertEqual(payload["sun"]["sunrise"][11:16], "07:32")
         self.assertEqual(payload["gtk4_css"], "gtk-Light.css")
 
     def test_config_set_persists_custom_theme_names(self):
-        result = self.run_cli("config", "set", "--light-theme", "MacTahoe-Light-solid",
-                              "--light-icons", "MacTahoe", "--buffer", "20")
+        result = self.run_cli("config", "set", "--light-theme", "Demo-Light-solid",
+                              "--light-icons", "demo-icons", "--buffer", "20")
         self.assertEqual(result.returncode, 0, result.stderr)
         saved = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
-        self.assertEqual(saved["light"]["gtk"], "MacTahoe-Light-solid")
-        self.assertEqual(saved["light"]["icons"], "MacTahoe")
+        self.assertEqual(saved["light"]["gtk"], "Demo-Light-solid")
+        self.assertEqual(saved["light"]["icons"], "demo-icons")
         self.assertEqual(saved["buffer_minutes"], 20)
         self.assertIn("已保存", result.stdout)
 
     def test_location_set_resolves_sun_times(self):
-        result = self.run_cli("location", "--set", "39.89455,116.35983")
+        result = self.run_cli("location", "--set", "48.8566,2.3522")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("06:39", result.stdout)
-        self.assertIn("17:16", result.stdout)
+        self.assertIn("07:32", result.stdout)
+        self.assertIn("17:35", result.stdout)
 
     def test_location_rejects_coordinates_from_another_timezone(self):
         before = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
@@ -127,6 +134,21 @@ class CliTest(unittest.TestCase):
         result = self.run_cli("tick", "--at", "2026-10-29T12:00")
         self.assertEqual(result.returncode, 2)
         self.assertIn("拒绝切换", result.stderr)
+
+    def test_config_detect_finds_theme_pairs(self):
+        for name in ("Demo-Light", "Demo-Dark"):
+            (self.home / ".themes" / name).mkdir(parents=True)
+        (self.home / ".icons" / "Demo-light").mkdir(parents=True)
+        (self.home / ".icons" / "Demo-dark").mkdir(parents=True)
+        result = self.run_cli("detect")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Demo-Light", result.stdout)
+        applied = self.run_cli("detect", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        saved = json.loads((self.home / ".config" / "lightswitch" / "config.json").read_text())
+        self.assertEqual(saved["light"]["gtk"], "Demo-Light")
+        self.assertEqual(saved["dark"]["gtk"], "Demo-Dark")
+        self.assertEqual(saved["light"]["icons"], "Demo-light")
 
     def test_location_clear_removes_coordinates(self):
         result = self.run_cli("location", "--clear")
